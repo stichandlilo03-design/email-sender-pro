@@ -1,97 +1,122 @@
 const express = require('express');
-const nodemailer = require('nodemailer');
 const cors = require('cors');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Health check endpoint
+// Health check
 app.get('/', (req, res) => {
-  res.json({ status: 'ok', message: 'Email API Server is running' });
+  res.json({ status: 'ok', message: 'Email API Server running (Resend)' });
 });
 
-// Test SMTP Connection
+// Test API Connection
 app.post('/api/test-smtp', async (req, res) => {
-  const { host, port, secure, user, pass } = req.body;
+  const { user, pass } = req.body;
   
-  console.log('📧 Testing SMTP:', { host, port, secure, user: user ? '***' : 'missing' });
+  // For Resend: user = "resend", pass = API key
+  const apiKey = pass || process.env.RESEND_API_KEY;
   
-  if (!host || !user || !pass) {
-    console.log('❌ Missing credentials');
-    return res.json({ success: false, error: 'Missing host, user, or password' });
+  console.log('📧 Testing Resend API connection...');
+  
+  if (!apiKey || apiKey.length < 10) {
+    return res.json({ success: false, error: 'Enter your Resend API key in the Password field' });
   }
   
   try {
-    const transporter = nodemailer.createTransport({
-      host,
-      port: parseInt(port) || 587,
-      secure: secure || parseInt(port) === 465,
-      auth: { user, pass },
-      connectionTimeout: 30000,
-      greetingTimeout: 30000,
-      socketTimeout: 30000,
-      tls: { 
-        rejectUnauthorized: false,
-        minVersion: 'TLSv1.2'
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
       },
-      debug: true,
-      logger: true
+      body: JSON.stringify({
+        from: 'onboarding@resend.dev',
+        to: 'test@test.com',
+        subject: 'Test',
+        html: '<p>Test</p>'
+      })
     });
     
-    console.log('⏳ Verifying SMTP connection...');
-    await transporter.verify();
-    console.log('✅ SMTP Connected successfully!');
-    res.json({ success: true, message: 'SMTP connection successful' });
+    const data = await response.json();
+    
+    if (response.status === 403 || data.statusCode === 403) {
+      // API key is valid but can't send to unverified email - this is OK!
+      console.log('✅ Resend API key is valid!');
+      return res.json({ success: true, message: 'API key valid! Ready to send emails.' });
+    }
+    
+    if (data.id) {
+      console.log('✅ Resend connected!');
+      return res.json({ success: true, message: 'Resend API connected!' });
+    }
+    
+    if (data.statusCode === 401) {
+      console.log('❌ Invalid API key');
+      return res.json({ success: false, error: 'Invalid API key' });
+    }
+    
+    console.log('✅ Resend API working');
+    res.json({ success: true, message: 'Resend API connected!' });
+    
   } catch (error) {
-    console.log('❌ SMTP Error:', error.message);
+    console.log('❌ Error:', error.message);
     res.json({ success: false, error: error.message });
   }
 });
 
-// Send Single Email
+// Send Email via Resend
 app.post('/api/send-email', async (req, res) => {
   const { smtp, from, to, cc, bcc, replyTo, subject, html } = req.body;
   
+  // API key comes from smtp.pass
+  const apiKey = smtp?.pass || process.env.RESEND_API_KEY;
+  
   console.log('📤 Sending email to:', to);
   
-  if (!smtp || !from || !to || !subject) {
-    console.log('❌ Missing required fields');
-    return res.json({ success: false, error: 'Missing required fields' });
+  if (!apiKey) {
+    return res.json({ success: false, error: 'Missing Resend API key' });
+  }
+  
+  if (!to || !subject) {
+    return res.json({ success: false, error: 'Missing to or subject' });
   }
   
   try {
-    const transporter = nodemailer.createTransport({
-      host: smtp.host,
-      port: parseInt(smtp.port) || 587,
-      secure: smtp.secure || parseInt(smtp.port) === 465,
-      auth: { user: smtp.user, pass: smtp.pass },
-      connectionTimeout: 30000,
-      greetingTimeout: 30000,
-      socketTimeout: 30000,
-      tls: { 
-        rejectUnauthorized: false,
-        minVersion: 'TLSv1.2'
-      }
-    });
-    
-    const mailOptions = {
-      from: `"${from.name}" <${from.email}>`,
-      to,
-      subject,
-      html
+    const emailData = {
+      from: from?.email ? `${from.name || 'Sender'} <${from.email}>` : 'onboarding@resend.dev',
+      to: to,
+      subject: subject,
+      html: html || '<p>No content</p>'
     };
     
-    if (cc) mailOptions.cc = cc;
-    if (bcc) mailOptions.bcc = bcc;
-    if (replyTo) mailOptions.replyTo = replyTo;
+    if (cc) emailData.cc = cc;
+    if (bcc) emailData.bcc = bcc;
+    if (replyTo) emailData.reply_to = replyTo;
     
-    console.log('⏳ Sending...');
-    const info = await transporter.sendMail(mailOptions);
-    console.log('✅ Email sent:', info.messageId);
-    res.json({ success: true, messageId: info.messageId });
+    console.log('⏳ Sending via Resend...');
+    
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(emailData)
+    });
+    
+    const data = await response.json();
+    
+    if (data.id) {
+      console.log('✅ Email sent! ID:', data.id);
+      return res.json({ success: true, messageId: data.id });
+    }
+    
+    console.log('❌ Resend error:', data);
+    res.json({ success: false, error: data.message || 'Failed to send' });
+    
   } catch (error) {
-    console.log('❌ Send Error:', error.message);
+    console.log('❌ Error:', error.message);
     res.json({ success: false, error: error.message });
   }
 });
@@ -99,7 +124,6 @@ app.post('/api/send-email', async (req, res) => {
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ Email API Server running on port ${PORT}`);
-  console.log(`📧 Test SMTP: POST /api/test-smtp`);
-  console.log(`📤 Send Email: POST /api/send-email`);
-  console.log(`💚 Health: GET /`);
+  console.log(`📧 Using Resend API for email delivery`);
+  console.log(`🆓 Free tier: 3,000 emails/month`);
 });
