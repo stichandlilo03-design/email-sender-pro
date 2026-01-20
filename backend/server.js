@@ -1,120 +1,134 @@
 const express = require('express');
 const cors = require('cors');
-
+const nodemailer = require('nodemailer');
 const app = express();
+
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
 // Health check
 app.get('/', (req, res) => {
-  res.json({ status: 'ok', message: 'Email API Server running (with Attachments)' });
+  res.json({ status: 'ok', message: 'Email API Server running (Universal SMTP Support)' });
 });
 
-// Test API Connection
+// Test SMTP Connection
 app.post('/api/test-smtp', async (req, res) => {
-  const { user, pass } = req.body;
-  const apiKey = pass || process.env.RESEND_API_KEY;
-  
-  console.log('📧 Testing Resend API connection...');
-  
-  if (!apiKey || apiKey.length < 10) {
-    return res.json({ success: false, error: 'Enter your Resend API key in the Password field' });
-  }
-  
-  try {
-    const response = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        from: 'onboarding@resend.dev',
-        to: 'test@test.com',
-        subject: 'Test',
-        html: '<p>Test</p>'
-      })
+  const { host, port, secure, user, pass } = req.body;
+
+  console.log(`📧 Testing SMTP: ${host}:${port} (secure: ${secure})`);
+
+  if (!host || !user || !pass) {
+    return res.json({ 
+      success: false, 
+      error: 'Missing host, username, or password' 
     });
+  }
+
+  try {
+    const transporter = nodemailer.createTransport({
+      host,
+      port: parseInt(port),
+      secure: secure === true || secure === 'true',
+      auth: {
+        user,
+        pass
+      },
+      tls: {
+        rejectUnauthorized: false
+      }
+    });
+
+    // Verify connection
+    await transporter.verify();
     
-    const data = await response.json();
-    
-    if (response.status === 403 || data.statusCode === 403) {
-      console.log('✅ Resend API key is valid!');
-      return res.json({ success: true, message: 'API key valid!' });
-    }
-    
-    if (data.id) {
-      console.log('✅ Resend connected!');
-      return res.json({ success: true, message: 'Resend API connected!' });
-    }
-    
-    if (data.statusCode === 401) {
-      return res.json({ success: false, error: 'Invalid API key' });
-    }
-    
-    res.json({ success: true, message: 'Resend API connected!' });
+    console.log('✅ SMTP connection successful!');
+    return res.json({ 
+      success: true, 
+      message: 'SMTP connection successful!' 
+    });
   } catch (error) {
-    res.json({ success: false, error: error.message });
+    console.log('❌ SMTP connection failed:', error.message);
+    return res.json({ 
+      success: false, 
+      error: error.message || 'SMTP connection failed' 
+    });
   }
 });
 
-// Send Email with Attachments
+// Send Email with Attachments (Universal SMTP)
 app.post('/api/send-email', async (req, res) => {
   const { smtp, from, to, cc, bcc, replyTo, subject, html, attachments } = req.body;
-  
-  const apiKey = smtp?.pass || process.env.RESEND_API_KEY;
-  
-  console.log('📤 Sending to:', to, '| Attachments:', attachments?.length || 0);
-  
-  if (!apiKey) return res.json({ success: false, error: 'Missing API key' });
-  if (!to || !subject) return res.json({ success: false, error: 'Missing to/subject' });
-  
+
+  console.log(`📤 Sending to: ${to} | Attachments: ${attachments?.length || 0}`);
+
+  if (!smtp || !smtp.host || !smtp.user || !smtp.pass) {
+    return res.json({ 
+      success: false, 
+      error: 'Missing SMTP credentials (host, user, pass)' 
+    });
+  }
+
+  if (!to || !subject || !html) {
+    return res.json({ 
+      success: false, 
+      error: 'Missing to, subject, or html' 
+    });
+  }
+
   try {
-    const emailData = {
-      from: from?.email ? `${from.name || 'Sender'} <${from.email}>` : 'onboarding@resend.dev',
+    const transporter = nodemailer.createTransport({
+      host: smtp.host,
+      port: parseInt(smtp.port || 587),
+      secure: smtp.secure === true || smtp.secure === 'true',
+      auth: {
+        user: smtp.user,
+        pass: smtp.pass
+      },
+      tls: {
+        rejectUnauthorized: false
+      }
+    });
+
+    const mailOptions = {
+      from: from?.email ? `${from.name || 'Sender'} <${from.email}>` : smtp.user,
       to,
       subject,
       html: html || '<p>No content</p>'
     };
-    
-    if (cc) emailData.cc = cc;
-    if (bcc) emailData.bcc = bcc;
-    if (replyTo) emailData.reply_to = replyTo;
-    
-    // Add attachments
-    if (attachments?.length > 0) {
-      emailData.attachments = attachments.map(att => ({
+
+    if (cc) mailOptions.cc = cc;
+    if (bcc) mailOptions.bcc = bcc;
+    if (replyTo) mailOptions.replyTo = replyTo;
+
+    // Handle attachments
+    if (attachments && attachments.length > 0) {
+      mailOptions.attachments = attachments.map(att => ({
         filename: att.filename,
-        content: att.content
+        content: Buffer.from(att.content, 'base64')
       }));
       console.log('📎 Attachments:', attachments.map(a => a.filename).join(', '));
     }
+
+    const info = await transporter.sendMail(mailOptions);
     
-    const response = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(emailData)
+    console.log('✅ Sent! MessageID:', info.messageId);
+    return res.json({ 
+      success: true, 
+      messageId: info.messageId,
+      response: info.response 
     });
-    
-    const data = await response.json();
-    
-    if (data.id) {
-      console.log('✅ Sent! ID:', data.id);
-      return res.json({ success: true, messageId: data.id });
-    }
-    
-    console.log('❌ Error:', data);
-    res.json({ success: false, error: data.message || 'Failed' });
   } catch (error) {
-    res.json({ success: false, error: error.message });
+    console.log('❌ Error:', error.message);
+    return res.json({ 
+      success: false, 
+      error: error.message || 'Failed to send email' 
+    });
   }
 });
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ Email API running on port ${PORT}`);
+  console.log(`📧 Universal SMTP support enabled`);
   console.log(`📎 Attachment support enabled`);
 });
