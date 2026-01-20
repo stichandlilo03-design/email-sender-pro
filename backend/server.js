@@ -16,6 +16,7 @@ app.post('/api/test-smtp', async (req, res) => {
   const { host, port, secure, user, pass } = req.body;
 
   console.log(`📧 Testing SMTP: ${host}:${port} (secure: ${secure})`);
+  console.log(`   User: ${user}`);
 
   if (!host || !user || !pass) {
     return res.json({ 
@@ -34,7 +35,7 @@ app.post('/api/test-smtp', async (req, res) => {
         pass
       },
       tls: {
-        rejectUnauthorized: false
+        rejectUnauthorized: false  // Important for shared hosting like Hostinger
       }
     });
 
@@ -47,10 +48,33 @@ app.post('/api/test-smtp', async (req, res) => {
       message: 'SMTP connection successful!' 
     });
   } catch (error) {
-    console.log('❌ SMTP connection failed:', error.message);
+    console.log('❌ SMTP connection failed:', {
+      code: error.code,
+      message: error.message,
+      host: host,
+      port: port,
+      secure: secure
+    });
+
+    // Helpful error messages
+    let hint = '';
+    if (error.code === 'ECONNRESET') {
+      hint = 'Connection reset - wrong port or server rejected. Try port 465 (SSL) or 587 (STARTTLS)';
+    } else if (error.code === 'ECONNREFUSED') {
+      hint = 'Connection refused - wrong host or port? Check SMTP settings.';
+    } else if (error.code === 'ETIMEDOUT') {
+      hint = 'Connection timeout - port might be blocked or host unreachable.';
+    } else if (error.code === 'ENOTFOUND') {
+      hint = 'Host not found - check hostname spelling (e.g., smtp.gmail.com)';
+    } else if (error.message.includes('Invalid login')) {
+      hint = 'Invalid credentials - check username and password.';
+    }
+
     return res.json({ 
       success: false, 
-      error: error.message || 'SMTP connection failed' 
+      error: error.message || 'SMTP connection failed',
+      code: error.code,
+      hint: hint
     });
   }
 });
