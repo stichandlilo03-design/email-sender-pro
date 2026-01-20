@@ -1,6 +1,6 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import EmailSenderUltimate from './EmailSenderUltimate'
+import EmailSenderUltimate from './components/EmailSenderUltimate'
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
