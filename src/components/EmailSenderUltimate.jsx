@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Send, Users, FileText, Upload, Trash2, Plus, Edit3, CheckCircle, XCircle, BarChart3, Pause, Play, Search, PenTool, Eye, X, TestTube, Wifi, WifiOff, RefreshCw, Save, Server, Shuffle, Check, Circle, RotateCcw, ChevronDown, ChevronRight, Download, Clock, Zap, AlertCircle, Info, Moon, Sun, Smartphone, Laptop, Sparkles, Mail, Loader, Paperclip, File } from 'lucide-react';
 
 const themes = {
@@ -17,11 +17,11 @@ export default function EmailSenderUltimate() {
     { id: 1, name: 'Welcome', subject: 'Welcome {{name}}!', body: '<h2 style="color:#667eea;">Welcome {{name}}!</h2><p>We are thrilled to have you.</p><p>Best,<br/>{{sender}}</p>', selected: false, attachments: [] },
     { id: 2, name: 'Follow Up', subject: 'Following up', body: '<p>Hi {{name}},</p><p>Just checking in.</p><p>Best,<br/>{{sender}}</p>', selected: false, attachments: [] },
   ]);
-  const [smtpAccounts, setSmtpAccounts] = useState([{ id: 1, name: 'Primary', host: 'api.resend.com', port: '587', username: '', password: '', fromName: '', fromEmail: '', status: 'untested', enabled: true, encryption: 'STARTTLS' }]);
+  const [smtpAccounts, setSmtpAccounts] = useState([{ id: 1, name: 'Primary', host: 'smtp.gmail.com', port: '587', username: '', password: '', fromName: '', fromEmail: '', status: 'untested', enabled: true, encryption: 'STARTTLS' }]);
   const [showSmtpModal, setShowSmtpModal] = useState(false);
   const [showSmtpImportModal, setShowSmtpImportModal] = useState(false);
   const [editingSmtp, setEditingSmtp] = useState(null);
-  const [newSmtp, setNewSmtp] = useState({ name: '', host: 'api.resend.com', port: '587', username: '', password: '', fromName: '', fromEmail: '', enabled: true, encryption: 'STARTTLS' });
+  const [newSmtp, setNewSmtp] = useState({ name: '', host: 'smtp.gmail.com', port: '587', username: '', password: '', fromName: '', fromEmail: '', enabled: true, encryption: 'STARTTLS' });
   const [smtpImportText, setSmtpImportText] = useState('');
   const [testingSmtpId, setTestingSmtpId] = useState(null);
   const [messageRotation, setMessageRotation] = useState(false);
@@ -60,6 +60,23 @@ export default function EmailSenderUltimate() {
   const enabledSmtp = smtpAccounts.filter(s => s.enabled);
   const selectedCount = contacts.filter(c => c.selected).length;
   const filteredContacts = contacts.filter(c => (selectedGroup === 'All' || c.group === selectedGroup) && (c.email.toLowerCase().includes(searchTerm.toLowerCase()) || c.name.toLowerCase().includes(searchTerm.toLowerCase())));
+
+  // Load campaigns from localStorage on mount
+  useEffect(() => {
+    const saved = localStorage.getItem('emailCampaigns');
+    if (saved) {
+      try {
+        setCampaigns(JSON.parse(saved));
+      } catch (e) {
+        console.error('Failed to load campaigns:', e);
+      }
+    }
+  }, []);
+
+  // Save campaigns to localStorage whenever they change
+  useEffect(() => {
+    localStorage.setItem('emailCampaigns', JSON.stringify(campaigns));
+  }, [campaigns]);
 
   const addNotification = (msg, type = 'info') => { const id = Date.now(); setNotifications(p => [...p, { id, message: msg, type }]); setTimeout(() => setNotifications(p => p.filter(n => n.id !== id)), 5000); };
   const replaceMergeFields = (text, contact, smtp) => text ? text.replace(/{{name}}/gi, contact?.name || '').replace(/{{email}}/gi, contact?.email || '').replace(/{{company}}/gi, contact?.company || '').replace(/{{sender}}/gi, smtp?.fromName || 'Team').replace(/{{date}}/gi, new Date().toLocaleDateString()) : text;
@@ -118,7 +135,7 @@ export default function EmailSenderUltimate() {
     if (editingSmtp) setSmtpAccounts(p => p.map(s => s.id === editingSmtp.id ? { ...newSmtp, id: s.id, status: 'untested' } : s));
     else setSmtpAccounts(p => [...p, { ...newSmtp, id: Date.now(), status: 'untested' }]);
     addNotification('SMTP saved', 'success');
-    setNewSmtp({ name: '', host: 'api.resend.com', port: '587', username: '', password: '', fromName: '', fromEmail: '', enabled: true, encryption: 'STARTTLS' });
+    setNewSmtp({ name: '', host: 'smtp.gmail.com', port: '587', username: '', password: '', fromName: '', fromEmail: '', enabled: true, encryption: 'STARTTLS' });
     setEditingSmtp(null); setShowSmtpModal(false);
   };
 
@@ -127,11 +144,24 @@ export default function EmailSenderUltimate() {
     const smtp = smtpAccounts.find(s => s.id === id);
     if (!smtp.username || !smtp.password) { setSmtpAccounts(p => p.map(s => s.id === id ? { ...s, status: 'failed' } : s)); addNotification('Missing credentials', 'danger'); setTestingSmtpId(null); return; }
     try {
-      const res = await fetch(apiEndpoint + '/api/test-smtp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ host: smtp.host, port: parseInt(smtp.port), secure: smtp.encryption === 'SSL/TLS', user: smtp.username, pass: smtp.password }) });
+      const res = await fetch(apiEndpoint + '/api/test-smtp', { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' }, 
+        body: JSON.stringify({ 
+          host: smtp.host, 
+          port: parseInt(smtp.port), 
+          secure: smtp.encryption === 'SSL/TLS', 
+          user: smtp.username, 
+          pass: smtp.password 
+        }) 
+      });
       const result = await res.json();
       setSmtpAccounts(p => p.map(s => s.id === id ? { ...s, status: result.success ? 'success' : 'failed' } : s));
       addNotification(result.success ? 'Connected!' : (result.error || 'Failed'), result.success ? 'success' : 'danger');
-    } catch { setSmtpAccounts(p => p.map(s => s.id === id ? { ...s, status: 'failed' } : s)); addNotification('Connection error', 'danger'); }
+    } catch (err) { 
+      setSmtpAccounts(p => p.map(s => s.id === id ? { ...s, status: 'failed' } : s)); 
+      addNotification('Connection error: ' + err.message, 'danger'); 
+    }
     setTestingSmtpId(null);
   };
 
@@ -165,12 +195,23 @@ export default function EmailSenderUltimate() {
     const body = replaceMergeFields(template.body, contact, smtp);
     try {
       const res = await fetch(apiEndpoint + '/api/send-email', { 
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' }, 
         body: JSON.stringify({ 
-          smtp: { host: smtp.host, port: parseInt(smtp.port), secure: smtp.encryption === 'SSL/TLS', user: smtp.username, pass: smtp.password }, 
-          from: { name: smtp.fromName, email: smtp.fromEmail }, to: contact.email, 
-          cc: emailData.cc || undefined, bcc: emailData.bcc || undefined, replyTo: emailData.replyTo || undefined, 
-          subject, html: body,
+          smtp: { 
+            host: smtp.host, 
+            port: parseInt(smtp.port), 
+            secure: smtp.encryption === 'SSL/TLS', 
+            user: smtp.username, 
+            pass: smtp.password 
+          }, 
+          from: { name: smtp.fromName, email: smtp.fromEmail }, 
+          to: contact.email, 
+          cc: emailData.cc || undefined, 
+          bcc: emailData.bcc || undefined, 
+          replyTo: emailData.replyTo || undefined, 
+          subject, 
+          html: body,
           attachments: (template.attachments || []).map(a => ({ filename: a.filename, content: a.content }))
         }) 
       });
@@ -188,7 +229,7 @@ export default function EmailSenderUltimate() {
 
     setSendingCampaign(true); setCampaignPaused(false); pausedRef.current = false; abortRef.current = false;
     setCampaignProgress(0); setCurrentEmailIndex(0); setSendingStats({ sent: 0, failed: 0, total: selected.length }); setSendingLog([]);
-    const campaign = { id: Date.now(), name: messageRotation ? 'Rotation' : emailData.subject.slice(0, 20), date: new Date().toLocaleString(), total: selected.length, sent: 0, failed: 0, status: 'sending' };
+    const campaign = { id: Date.now(), name: messageRotation ? 'Rotation' : emailData.subject.slice(0, 20), date: new Date().toLocaleString(), total: selected.length, sent: 0, failed: 0, status: 'sending', log: [] };
     setCampaigns(p => [campaign, ...p]);
     addLogEntry({ type: 'info', message: '🚀 Started - ' + selected.length + ' recipients' + (smtpRotation ? ' | SMTP rotation ON' : '') });
 
@@ -203,10 +244,10 @@ export default function EmailSenderUltimate() {
       if (result.success) { sent++; addLogEntry({ type: 'success', message: '✅ ' + contact.email }); setContacts(p => p.map(c => c.id === contact.id ? { ...c, status: 'sent' } : c)); }
       else { failed++; addLogEntry({ type: 'error', message: '❌ ' + contact.email + ' - ' + (result.error || 'Error') }); setContacts(p => p.map(c => c.id === contact.id ? { ...c, status: 'failed' } : c)); }
       setSendingStats({ sent, failed, total: selected.length }); setCampaignProgress(Math.round(((i + 1) / selected.length) * 100));
-      setCampaigns(p => p.map(c => c.id === campaign.id ? { ...c, sent, failed } : c));
+      setCampaigns(p => p.map(c => c.id === campaign.id ? { ...c, sent, failed, log: sendingLog } : c));
       if (i < selected.length - 1 && !abortRef.current) { addLogEntry({ type: 'info', message: '⏳ Wait ' + sendDelay + 's' }); await new Promise(r => setTimeout(r, sendDelay * 1000)); }
     }
-    setCampaigns(p => p.map(c => c.id === campaign.id ? { ...c, status: 'completed' } : c));
+    setCampaigns(p => p.map(c => c.id === campaign.id ? { ...c, status: 'completed', log: sendingLog } : c));
     setSendingCampaign(false);
     addLogEntry({ type: 'complete', message: '🎉 Done! ' + sent + ' sent, ' + failed + ' failed' });
     addNotification('Done! ' + sent + ' sent', sent > 0 ? 'success' : 'warning');
@@ -214,7 +255,27 @@ export default function EmailSenderUltimate() {
 
   const togglePause = () => { pausedRef.current = !pausedRef.current; setCampaignPaused(pausedRef.current); addLogEntry({ type: 'info', message: pausedRef.current ? '⏸️ Paused' : '▶️ Resumed' }); };
   const abortCampaign = () => { abortRef.current = true; pausedRef.current = false; setCampaignPaused(false); };
-  const exportData = (type) => { let data, fn; if (type === 'contacts') { data = 'email,name,company,group,status\n' + contacts.map(c => [c.email, c.name, c.company, c.group, c.status].join(',')).join('\n'); fn = 'contacts.csv'; } else if (type === 'templates') { data = JSON.stringify(templates, null, 2); fn = 'templates.json'; } else { data = smtpAccounts.map(s => [s.host, s.port, s.username, s.password, s.fromName, s.fromEmail, s.name].join('|')).join('\n'); fn = 'smtp.txt'; } const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([data])); a.download = fn; a.click(); };
+  
+  const exportData = (type) => { 
+    let data, fn; 
+    if (type === 'contacts') { 
+      data = 'email,name,company,group,status\n' + contacts.map(c => [c.email, c.name, c.company, c.group, c.status].join(',')).join('\n'); 
+      fn = 'contacts.csv'; 
+    } else if (type === 'templates') { 
+      data = JSON.stringify(templates, null, 2); 
+      fn = 'templates.json'; 
+    } else if (type === 'campaigns') {
+      data = JSON.stringify(campaigns, null, 2);
+      fn = 'campaigns.json';
+    } else { 
+      data = smtpAccounts.map(s => [s.host, s.port, s.username, s.password, s.fromName, s.fromEmail, s.name].join('|')).join('\n'); 
+      fn = 'smtp.txt'; 
+    } 
+    const a = document.createElement('a'); 
+    a.href = URL.createObjectURL(new Blob([data])); 
+    a.download = fn; 
+    a.click(); 
+  };
 
   const s = {
     container: { minHeight: '100vh', background: theme.bg, padding: 24, fontFamily: 'Inter,-apple-system,sans-serif', color: theme.text },
@@ -260,7 +321,7 @@ export default function EmailSenderUltimate() {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
               <div style={{ background: 'rgba(255,255,255,0.2)', padding: 14, borderRadius: 14 }}><Send color="#fff" size={32}/></div>
-              <div><h1 style={{ margin: 0, fontSize: 28, color: '#fff' }}>Email Sender Ultimate</h1><p style={{ margin: '4px 0 0', color: 'rgba(255,255,255,0.8)', fontSize: 14 }}>SMTP Rotation + Attachments 📎</p></div>
+              <div><h1 style={{ margin: 0, fontSize: 28, color: '#fff' }}>Email Sender Ultimate</h1><p style={{ margin: '4px 0 0', color: 'rgba(255,255,255,0.8)', fontSize: 14 }}>Universal SMTP + Attachments 📎</p></div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
               <div style={{ display: 'flex', gap: 20 }}>
@@ -329,14 +390,14 @@ export default function EmailSenderUltimate() {
 
         {activeTab === 'templates' && <div style={s.card}><div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 24 }}><h2 style={{ fontSize: 20, margin: 0 }}>📝 Templates</h2><div style={{ display: 'flex', gap: 8 }}><button onClick={() => exportData('templates')} style={{ ...s.btn, ...s.btnSecondary }}><Download size={18}/></button><button onClick={() => { setNewTemplate({ name: '', subject: '', body: '', attachments: [] }); setEditingTemplate(null); setShowTemplateModal(true); }} style={{ ...s.btn, ...s.btnPrimary }}><Plus size={18}/> New</button></div></div><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 20 }}>{templates.map(t => <div key={t.id} style={{ border: '2px solid ' + (t.selected ? theme.success : theme.cardBorder), borderRadius: 14, padding: 20, background: t.selected ? theme.success + '10' : theme.card }}><div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}><h3 style={{ fontWeight: 600, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}><FileText size={18} color={theme.accent}/> {t.name} {t.attachments?.length > 0 && <span style={{ ...s.badge, background: theme.accent + '25', color: theme.accent, padding: '2px 8px' }}><Paperclip size={12}/> {t.attachments.length}</span>}</h3><div style={{ display: 'flex', gap: 4 }}><button onClick={() => toggleTemplate(t.id)} style={{ ...s.btnIcon, color: t.selected ? theme.success : theme.textMuted }}>{t.selected ? <CheckCircle size={18}/> : <Circle size={18}/>}</button><button onClick={() => { setNewTemplate({ ...t, attachments: t.attachments || [] }); setEditingTemplate(t); setShowTemplateModal(true); }} style={{ ...s.btnIcon, color: theme.accent }}><Edit3 size={16}/></button><button onClick={() => setTemplates(p => p.filter(x => x.id !== t.id))} style={{ ...s.btnIcon, color: theme.danger }}><Trash2 size={16}/></button></div></div><div style={{ fontSize: 14, color: theme.accent, marginBottom: 8 }}>{t.subject}</div><div style={{ fontSize: 13, color: theme.textMuted, maxHeight: 50, overflow: 'hidden', marginBottom: 12 }}>{t.body.replace(/<[^>]+>/g, ' ').slice(0, 80)}...</div><button onClick={() => { setEmailData(p => ({ ...p, subject: t.subject, body: t.body })); setAttachments(t.attachments || []); setActiveTab('compose'); }} style={{ ...s.btn, ...s.btnPrimary, width: '100%' }}>Use</button></div>)}</div></div>}
 
-        {activeTab === 'smtp' && <div style={s.card}><div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}><h2 style={{ fontSize: 20, margin: 0 }}>📮 SMTP</h2><div style={{ display: 'flex', gap: 8 }}><button onClick={testAllSmtp} style={{ ...s.btn, ...s.btnWarning }}><RefreshCw size={18}/> Test All</button><button onClick={() => setShowSmtpImportModal(true)} style={{ ...s.btn, ...s.btnSecondary }}><Upload size={18}/> Bulk</button><button onClick={() => exportData('smtp')} style={{ ...s.btn, ...s.btnSecondary }}><Download size={18}/></button><button onClick={() => { setNewSmtp({ name: '', host: 'api.resend.com', port: '587', username: '', password: '', fromName: '', fromEmail: '', enabled: true, encryption: 'STARTTLS' }); setEditingSmtp(null); setShowSmtpModal(true); }} style={{ ...s.btn, ...s.btnPrimary }}><Plus size={18}/> Add</button></div></div><div style={{ background: theme.accent + '15', borderRadius: 12, padding: 20, marginBottom: 24 }}><h3 style={{ fontSize: 14, color: theme.accent, marginBottom: 12 }}><Zap size={18}/> Quick Setup</h3><div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>{[{ n: 'Resend', h: 'api.resend.com' }, { n: 'Gmail', h: 'smtp.gmail.com' }, { n: 'Office 365', h: 'smtp.office365.com' }].map(pr => <button key={pr.n} onClick={() => { setNewSmtp(p => ({ ...p, name: pr.n, host: pr.h })); setShowSmtpModal(true); }} style={{ ...s.btn, ...s.btnSecondary }}>{pr.n}</button>)}</div></div><div>{smtpAccounts.map(sm => <div key={sm.id} style={{ border: '2px solid ' + (sm.enabled ? theme.cardBorder : theme.danger + '40'), borderRadius: 14, padding: 20, marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, opacity: sm.enabled ? 1 : 0.7 }}><div style={{ display: 'flex', alignItems: 'center', gap: 16 }}><input type="checkbox" checked={sm.enabled} onChange={() => setSmtpAccounts(p => p.map(x => x.id === sm.id ? { ...x, enabled: !x.enabled } : x))} style={{ width: 20, height: 20 }}/><div style={{ width: 46, height: 46, borderRadius: 12, background: theme.accentGradient, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Server size={24} color="#fff"/></div><div><h3 style={{ margin: 0, fontWeight: 600 }}>{sm.name}</h3><div style={{ fontSize: 12, color: theme.textMuted }}>{sm.host}:{sm.port}</div></div></div><div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ ...s.badge, background: sm.status === 'success' ? theme.success + '25' : sm.status === 'failed' ? theme.danger + '25' : theme.input, color: sm.status === 'success' ? theme.success : sm.status === 'failed' ? theme.danger : theme.textMuted }}>{sm.status === 'success' ? <Wifi size={12}/> : sm.status === 'failed' ? <WifiOff size={12}/> : null} {sm.status === 'success' ? 'OK' : sm.status === 'failed' ? 'Fail' : 'Test'}</span><button onClick={() => testSmtp(sm.id)} disabled={testingSmtpId === sm.id} style={{ ...s.btn, ...s.btnSmall, ...s.btnWarning }}>{testingSmtpId === sm.id ? <RefreshCw size={14} className="spin"/> : <TestTube size={14}/>} Test</button><button onClick={() => { setNewSmtp({ ...sm }); setEditingSmtp(sm); setShowSmtpModal(true); }} style={{ ...s.btn, ...s.btnSmall, ...s.btnSecondary }}><Edit3 size={14}/></button><button onClick={() => smtpAccounts.length > 1 && setSmtpAccounts(p => p.filter(x => x.id !== sm.id))} style={{ ...s.btn, ...s.btnSmall, ...s.btnDanger }}><Trash2 size={14}/></button></div></div>)}</div></div>}
+        {activeTab === 'smtp' && <div style={s.card}><div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}><h2 style={{ fontSize: 20, margin: 0 }}>📮 SMTP</h2><div style={{ display: 'flex', gap: 8 }}><button onClick={testAllSmtp} style={{ ...s.btn, ...s.btnWarning }}><RefreshCw size={18}/> Test All</button><button onClick={() => setShowSmtpImportModal(true)} style={{ ...s.btn, ...s.btnSecondary }}><Upload size={18}/> Bulk</button><button onClick={() => exportData('smtp')} style={{ ...s.btn, ...s.btnSecondary }}><Download size={18}/></button><button onClick={() => { setNewSmtp({ name: '', host: 'smtp.gmail.com', port: '587', username: '', password: '', fromName: '', fromEmail: '', enabled: true, encryption: 'STARTTLS' }); setEditingSmtp(null); setShowSmtpModal(true); }} style={{ ...s.btn, ...s.btnPrimary }}><Plus size={18}/> Add</button></div></div><div style={{ background: theme.accent + '15', borderRadius: 12, padding: 20, marginBottom: 24 }}><h3 style={{ fontSize: 14, color: theme.accent, marginBottom: 12 }}><Zap size={18}/> Popular SMTP Providers</h3><div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>{[{ n: 'Gmail', h: 'smtp.gmail.com' }, { n: 'Office 365', h: 'smtp.office365.com' }, { n: 'SendGrid', h: 'smtp.sendgrid.net' }, { n: 'AWS SES', h: 'email-smtp.us-east-1.amazonaws.com' }].map(pr => <button key={pr.n} onClick={() => { setNewSmtp(p => ({ ...p, name: pr.n, host: pr.h })); setShowSmtpModal(true); }} style={{ ...s.btn, ...s.btnSecondary }}>{pr.n}</button>)}</div></div><div>{smtpAccounts.map(sm => <div key={sm.id} style={{ border: '2px solid ' + (sm.enabled ? theme.cardBorder : theme.danger + '40'), borderRadius: 14, padding: 20, marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, opacity: sm.enabled ? 1 : 0.7 }}><div style={{ display: 'flex', alignItems: 'center', gap: 16 }}><input type="checkbox" checked={sm.enabled} onChange={() => setSmtpAccounts(p => p.map(x => x.id === sm.id ? { ...x, enabled: !x.enabled } : x))} style={{ width: 20, height: 20 }}/><div style={{ width: 46, height: 46, borderRadius: 12, background: theme.accentGradient, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Server size={24} color="#fff"/></div><div><h3 style={{ margin: 0, fontWeight: 600 }}>{sm.name}</h3><div style={{ fontSize: 12, color: theme.textMuted }}>{sm.host}:{sm.port}</div></div></div><div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ ...s.badge, background: sm.status === 'success' ? theme.success + '25' : sm.status === 'failed' ? theme.danger + '25' : theme.input, color: sm.status === 'success' ? theme.success : sm.status === 'failed' ? theme.danger : theme.textMuted }}>{sm.status === 'success' ? <Wifi size={12}/> : sm.status === 'failed' ? <WifiOff size={12}/> : null} {sm.status === 'success' ? 'OK' : sm.status === 'failed' ? 'Fail' : 'Test'}</span><button onClick={() => testSmtp(sm.id)} disabled={testingSmtpId === sm.id} style={{ ...s.btn, ...s.btnSmall, ...s.btnWarning }}>{testingSmtpId === sm.id ? <RefreshCw size={14} className="spin"/> : <TestTube size={14}/>} Test</button><button onClick={() => { setNewSmtp({ ...sm }); setEditingSmtp(sm); setShowSmtpModal(true); }} style={{ ...s.btn, ...s.btnSmall, ...s.btnSecondary }}><Edit3 size={14}/></button><button onClick={() => smtpAccounts.length > 1 && setSmtpAccounts(p => p.filter(x => x.id !== sm.id))} style={{ ...s.btn, ...s.btnSmall, ...s.btnDanger }}><Trash2 size={14}/></button></div></div>)}</div></div>}
 
-        {activeTab === 'campaigns' && <div style={s.card}><h2 style={{ fontSize: 20, marginBottom: 24 }}>📊 Campaigns</h2>{campaigns.length ? campaigns.map(c => <div key={c.id} style={{ border: '2px solid ' + theme.cardBorder, borderRadius: 14, padding: 24, marginBottom: 16 }}><div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}><div><h3 style={{ margin: 0 }}>{c.name}</h3><div style={{ fontSize: 13, color: theme.textMuted }}>{c.date}</div></div><span style={{ ...s.badge, background: c.status === 'completed' ? theme.success + '25' : theme.warning + '25', color: c.status === 'completed' ? theme.success : theme.warning }}>{c.status === 'completed' ? <CheckCircle size={14}/> : <Clock size={14}/>} {c.status}</span></div><div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}><div style={s.statBox}><div style={{ fontSize: 22, fontWeight: 700, color: theme.textMuted }}>{c.total}</div><div style={{ fontSize: 12, color: theme.textMuted }}>Total</div></div><div style={s.statBox}><div style={{ fontSize: 22, fontWeight: 700, color: theme.success }}>{c.sent}</div><div style={{ fontSize: 12, color: theme.textMuted }}>Sent</div></div><div style={s.statBox}><div style={{ fontSize: 22, fontWeight: 700, color: theme.danger }}>{c.failed}</div><div style={{ fontSize: 12, color: theme.textMuted }}>Failed</div></div><div style={s.statBox}><div style={{ fontSize: 22, fontWeight: 700, color: theme.accent }}>{c.total ? Math.round(c.sent / c.total * 100) : 0}%</div><div style={{ fontSize: 12, color: theme.textMuted }}>Success</div></div></div></div>) : <div style={{ textAlign: 'center', padding: 60, color: theme.textMuted }}><BarChart3 size={60} style={{ opacity: 0.3 }}/><p>No campaigns</p></div>}</div>}
+        {activeTab === 'campaigns' && <div style={s.card}><div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}><h2 style={{ fontSize: 20, margin: 0 }}>📊 Campaigns</h2><button onClick={() => exportData('campaigns')} style={{ ...s.btn, ...s.btnSecondary }}><Download size={18}/></button></div>{campaigns.length ? campaigns.map(c => <div key={c.id} style={{ border: '2px solid ' + theme.cardBorder, borderRadius: 14, padding: 24, marginBottom: 16 }}><div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}><div><h3 style={{ margin: 0 }}>{c.name}</h3><div style={{ fontSize: 13, color: theme.textMuted }}>{c.date}</div></div><span style={{ ...s.badge, background: c.status === 'completed' ? theme.success + '25' : theme.warning + '25', color: c.status === 'completed' ? theme.success : theme.warning }}>{c.status === 'completed' ? <CheckCircle size={14}/> : <Clock size={14}/>} {c.status}</span></div><div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 16 }}><div style={s.statBox}><div style={{ fontSize: 22, fontWeight: 700, color: theme.textMuted }}>{c.total}</div><div style={{ fontSize: 12, color: theme.textMuted }}>Total</div></div><div style={s.statBox}><div style={{ fontSize: 22, fontWeight: 700, color: theme.success }}>{c.sent}</div><div style={{ fontSize: 12, color: theme.textMuted }}>Sent</div></div><div style={s.statBox}><div style={{ fontSize: 22, fontWeight: 700, color: theme.danger }}>{c.failed}</div><div style={{ fontSize: 12, color: theme.textMuted }}>Failed</div></div><div style={s.statBox}><div style={{ fontSize: 22, fontWeight: 700, color: theme.accent }}>{c.total ? Math.round(c.sent / c.total * 100) : 0}%</div><div style={{ fontSize: 12, color: theme.textMuted }}>Success</div></div></div>{c.log && c.log.length > 0 && <div style={{ maxHeight: 200, overflowY: 'auto', ...s.logContainer, marginTop: 0 }}><div style={{ ...s.logHeader, background: theme.accent, padding: '8px 12px' }}><span style={{ fontSize: 12, fontWeight: 600 }}>📜 Log ({c.log.length} entries)</span></div><div style={{ padding: '8px 12px', background: '#0a0a0f', maxHeight: 150, overflowY: 'auto', fontFamily: 'monospace', fontSize: 11 }}>{c.log.slice(-20).map((log, i) => <div key={i} style={{ color: log.type === 'success' ? '#34d399' : log.type === 'error' ? '#f87171' : theme.textMuted, marginBottom: 2 }}>{log.timestamp} - {log.message}</div>)}</div></div>}</div>) : <div style={{ textAlign: 'center', padding: 60, color: theme.textMuted }}><BarChart3 size={60} style={{ opacity: 0.3 }}/><p>No campaigns yet</p></div>}</div>}
       </div>
 
-      {showSmtpModal && <div style={s.modal} onClick={() => setShowSmtpModal(false)}><div style={s.modalContent} onClick={e => e.stopPropagation()}><div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 24 }}><h2 style={{ margin: 0 }}>{editingSmtp ? 'Edit' : 'Add'} SMTP</h2><button onClick={() => setShowSmtpModal(false)} style={s.btnIcon}><X size={24}/></button></div><div><label style={{ fontSize: 13, color: theme.textMuted }}>Name *</label><input style={s.input} placeholder="My SMTP" value={newSmtp.name} onChange={e => setNewSmtp(p => ({ ...p, name: e.target.value }))}/></div><div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 12 }}><div><label style={{ fontSize: 13, color: theme.textMuted }}>Host *</label><input style={s.input} placeholder="api.resend.com" value={newSmtp.host} onChange={e => setNewSmtp(p => ({ ...p, host: e.target.value }))}/></div><div><label style={{ fontSize: 13, color: theme.textMuted }}>Port</label><input style={s.input} placeholder="587" value={newSmtp.port} onChange={e => setNewSmtp(p => ({ ...p, port: e.target.value }))}/></div></div><div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}><div><label style={{ fontSize: 13, color: theme.textMuted }}>Username</label><input style={s.input} placeholder="resend" value={newSmtp.username} onChange={e => setNewSmtp(p => ({ ...p, username: e.target.value }))}/></div><div><label style={{ fontSize: 13, color: theme.textMuted }}>Password/Key</label><input type="password" style={s.input} placeholder="API key" value={newSmtp.password} onChange={e => setNewSmtp(p => ({ ...p, password: e.target.value }))}/></div></div><div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}><div><label style={{ fontSize: 13, color: theme.textMuted }}>From Name</label><input style={s.input} placeholder="Your Name" value={newSmtp.fromName} onChange={e => setNewSmtp(p => ({ ...p, fromName: e.target.value }))}/></div><div><label style={{ fontSize: 13, color: theme.textMuted }}>From Email</label><input style={s.input} placeholder="you@domain.com" value={newSmtp.fromEmail} onChange={e => setNewSmtp(p => ({ ...p, fromEmail: e.target.value }))}/></div></div><button onClick={addSmtpAccount} style={{ ...s.btn, ...s.btnPrimary, width: '100%', marginTop: 12, justifyContent: 'center' }}>{editingSmtp ? 'Update' : 'Add'}</button></div></div>}
+      {showSmtpModal && <div style={s.modal} onClick={() => setShowSmtpModal(false)}><div style={s.modalContent} onClick={e => e.stopPropagation()}><div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 24 }}><h2 style={{ margin: 0 }}>{editingSmtp ? 'Edit' : 'Add'} SMTP</h2><button onClick={() => setShowSmtpModal(false)} style={s.btnIcon}><X size={24}/></button></div><div><label style={{ fontSize: 13, color: theme.textMuted }}>Name *</label><input style={s.input} placeholder="My SMTP" value={newSmtp.name} onChange={e => setNewSmtp(p => ({ ...p, name: e.target.value }))}/></div><div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 12 }}><div><label style={{ fontSize: 13, color: theme.textMuted }}>Host *</label><input style={s.input} placeholder="smtp.gmail.com" value={newSmtp.host} onChange={e => setNewSmtp(p => ({ ...p, host: e.target.value }))}/></div><div><label style={{ fontSize: 13, color: theme.textMuted }}>Port</label><input style={s.input} placeholder="587" value={newSmtp.port} onChange={e => setNewSmtp(p => ({ ...p, port: e.target.value }))}/></div></div><div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}><div><label style={{ fontSize: 13, color: theme.textMuted }}>Username</label><input style={s.input} placeholder="your@gmail.com" value={newSmtp.username} onChange={e => setNewSmtp(p => ({ ...p, username: e.target.value }))}/></div><div><label style={{ fontSize: 13, color: theme.textMuted }}>Password/Key</label><input type="password" style={s.input} placeholder="Password" value={newSmtp.password} onChange={e => setNewSmtp(p => ({ ...p, password: e.target.value }))}/></div></div><div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}><div><label style={{ fontSize: 13, color: theme.textMuted }}>From Name</label><input style={s.input} placeholder="Your Name" value={newSmtp.fromName} onChange={e => setNewSmtp(p => ({ ...p, fromName: e.target.value }))}/></div><div><label style={{ fontSize: 13, color: theme.textMuted }}>From Email</label><input style={s.input} placeholder="you@domain.com" value={newSmtp.fromEmail} onChange={e => setNewSmtp(p => ({ ...p, fromEmail: e.target.value }))}/></div></div><button onClick={addSmtpAccount} style={{ ...s.btn, ...s.btnPrimary, width: '100%', marginTop: 12, justifyContent: 'center' }}>{editingSmtp ? 'Update' : 'Add'}</button></div></div>}
 
-      {showSmtpImportModal && <div style={s.modal} onClick={() => setShowSmtpImportModal(false)}><div style={s.modalContent} onClick={e => e.stopPropagation()}><div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 24 }}><h2 style={{ margin: 0 }}>Bulk Import</h2><button onClick={() => setShowSmtpImportModal(false)} style={s.btnIcon}><X size={24}/></button></div><p style={{ fontSize: 13, color: theme.textMuted, marginBottom: 12 }}>host|port|user|pass|fromName|fromEmail|name</p><textarea style={{ ...s.textarea, minHeight: 120 }} placeholder="api.resend.com|587|resend|re_xxx|Sender|email@domain.com|Resend" value={smtpImportText} onChange={e => setSmtpImportText(e.target.value)}/><div style={{ display: 'flex', gap: 12, marginTop: 16 }}><button onClick={handleSmtpImport} style={{ ...s.btn, ...s.btnPrimary, flex: 1 }}><Plus size={18}/> Import</button><label style={{ ...s.btn, ...s.btnSecondary, cursor: 'pointer' }}><Upload size={18}/><input type="file" style={{ display: 'none' }} accept=".txt,.csv" onChange={handleSmtpFileUpload}/></label></div></div></div>}
+      {showSmtpImportModal && <div style={s.modal} onClick={() => setShowSmtpImportModal(false)}><div style={s.modalContent} onClick={e => e.stopPropagation()}><div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 24 }}><h2 style={{ margin: 0 }}>Bulk Import</h2><button onClick={() => setShowSmtpImportModal(false)} style={s.btnIcon}><X size={24}/></button></div><p style={{ fontSize: 13, color: theme.textMuted, marginBottom: 12 }}>host|port|user|pass|fromName|fromEmail|name</p><textarea style={{ ...s.textarea, minHeight: 120 }} placeholder="smtp.gmail.com|587|you@gmail.com|password|Your Name|you@gmail.com|Gmail" value={smtpImportText} onChange={e => setSmtpImportText(e.target.value)}/><div style={{ display: 'flex', gap: 12, marginTop: 16 }}><button onClick={handleSmtpImport} style={{ ...s.btn, ...s.btnPrimary, flex: 1 }}><Plus size={18}/> Import</button><label style={{ ...s.btn, ...s.btnSecondary, cursor: 'pointer' }}><Upload size={18}/><input type="file" style={{ display: 'none' }} accept=".txt,.csv" onChange={handleSmtpFileUpload}/></label></div></div></div>}
 
       {showTemplateModal && <div style={s.modal} onClick={() => setShowTemplateModal(false)}><div style={{ ...s.modalContent, maxWidth: 650 }} onClick={e => e.stopPropagation()}><div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 24 }}><h2 style={{ margin: 0 }}>{editingTemplate ? 'Edit' : 'New'} Template</h2><button onClick={() => setShowTemplateModal(false)} style={s.btnIcon}><X size={24}/></button></div><div><label style={{ fontSize: 13, color: theme.textMuted }}>Name *</label><input style={s.input} placeholder="My Template" value={newTemplate.name} onChange={e => setNewTemplate(p => ({ ...p, name: e.target.value }))}/></div><div><label style={{ fontSize: 13, color: theme.textMuted }}>Subject</label><input style={s.input} placeholder="Subject..." value={newTemplate.subject} onChange={e => setNewTemplate(p => ({ ...p, subject: e.target.value }))}/></div><div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}><span style={{ fontSize: 12, color: theme.textMuted }}>Insert:</span>{mergeFields.map(f => <button key={f} onClick={() => setNewTemplate(p => ({ ...p, body: p.body + ' ' + f }))} style={{ ...s.btn, ...s.btnSecondary, padding: '4px 8px', fontSize: 11 }}>{f}</button>)}</div><div><label style={{ fontSize: 13, color: theme.textMuted }}>Body (HTML)</label><textarea style={{ ...s.textarea, minHeight: 120 }} placeholder="<p>Hi {{name}},</p>" value={newTemplate.body} onChange={e => setNewTemplate(p => ({ ...p, body: e.target.value }))}/></div><div style={{ ...s.attachBox, marginTop: 16 }}><div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: (newTemplate.attachments?.length || 0) > 0 ? 12 : 0 }}><div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Paperclip size={18} color={theme.accent}/><span style={{ fontWeight: 600 }}>Attachments ({newTemplate.attachments?.length || 0})</span></div><button onClick={() => templateAttachmentRef.current?.click()} style={{ ...s.btn, ...s.btnSecondary, ...s.btnSmall }}><Plus size={14}/> Add</button></div>{(newTemplate.attachments || []).map(a => <div key={a.id} style={s.attachItem}><File size={16} color={theme.accent}/><div style={{ flex: 1 }}><div style={{ fontSize: 12 }}>{a.filename}</div><div style={{ fontSize: 10, color: theme.textMuted }}>{formatFileSize(a.size)}</div></div><button onClick={() => removeAttachment(a.id, true)} style={{ ...s.btnIcon, color: theme.danger, padding: 4 }}><X size={14}/></button></div>)}</div><button onClick={saveTemplate} style={{ ...s.btn, ...s.btnPrimary, width: '100%', marginTop: 16, justifyContent: 'center' }}>{editingTemplate ? 'Update' : 'Save'}</button></div></div>}
     </div>
