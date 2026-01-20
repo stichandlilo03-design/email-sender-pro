@@ -3,18 +3,16 @@ const cors = require('cors');
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
 
 // Health check
 app.get('/', (req, res) => {
-  res.json({ status: 'ok', message: 'Email API Server running (Resend)' });
+  res.json({ status: 'ok', message: 'Email API Server running (with Attachments)' });
 });
 
 // Test API Connection
 app.post('/api/test-smtp', async (req, res) => {
   const { user, pass } = req.body;
-  
-  // For Resend: user = "resend", pass = API key
   const apiKey = pass || process.env.RESEND_API_KEY;
   
   console.log('📧 Testing Resend API connection...');
@@ -41,9 +39,8 @@ app.post('/api/test-smtp', async (req, res) => {
     const data = await response.json();
     
     if (response.status === 403 || data.statusCode === 403) {
-      // API key is valid but can't send to unverified email - this is OK!
       console.log('✅ Resend API key is valid!');
-      return res.json({ success: true, message: 'API key valid! Ready to send emails.' });
+      return res.json({ success: true, message: 'API key valid!' });
     }
     
     if (data.id) {
@@ -52,41 +49,31 @@ app.post('/api/test-smtp', async (req, res) => {
     }
     
     if (data.statusCode === 401) {
-      console.log('❌ Invalid API key');
       return res.json({ success: false, error: 'Invalid API key' });
     }
     
-    console.log('✅ Resend API working');
     res.json({ success: true, message: 'Resend API connected!' });
-    
   } catch (error) {
-    console.log('❌ Error:', error.message);
     res.json({ success: false, error: error.message });
   }
 });
 
-// Send Email via Resend
+// Send Email with Attachments
 app.post('/api/send-email', async (req, res) => {
-  const { smtp, from, to, cc, bcc, replyTo, subject, html } = req.body;
+  const { smtp, from, to, cc, bcc, replyTo, subject, html, attachments } = req.body;
   
-  // API key comes from smtp.pass
   const apiKey = smtp?.pass || process.env.RESEND_API_KEY;
   
-  console.log('📤 Sending email to:', to);
+  console.log('📤 Sending to:', to, '| Attachments:', attachments?.length || 0);
   
-  if (!apiKey) {
-    return res.json({ success: false, error: 'Missing Resend API key' });
-  }
-  
-  if (!to || !subject) {
-    return res.json({ success: false, error: 'Missing to or subject' });
-  }
+  if (!apiKey) return res.json({ success: false, error: 'Missing API key' });
+  if (!to || !subject) return res.json({ success: false, error: 'Missing to/subject' });
   
   try {
     const emailData = {
       from: from?.email ? `${from.name || 'Sender'} <${from.email}>` : 'onboarding@resend.dev',
-      to: to,
-      subject: subject,
+      to,
+      subject,
       html: html || '<p>No content</p>'
     };
     
@@ -94,7 +81,14 @@ app.post('/api/send-email', async (req, res) => {
     if (bcc) emailData.bcc = bcc;
     if (replyTo) emailData.reply_to = replyTo;
     
-    console.log('⏳ Sending via Resend...');
+    // Add attachments
+    if (attachments?.length > 0) {
+      emailData.attachments = attachments.map(att => ({
+        filename: att.filename,
+        content: att.content
+      }));
+      console.log('📎 Attachments:', attachments.map(a => a.filename).join(', '));
+    }
     
     const response = await fetch('https://api.resend.com/emails', {
       method: 'POST',
@@ -108,22 +102,19 @@ app.post('/api/send-email', async (req, res) => {
     const data = await response.json();
     
     if (data.id) {
-      console.log('✅ Email sent! ID:', data.id);
+      console.log('✅ Sent! ID:', data.id);
       return res.json({ success: true, messageId: data.id });
     }
     
-    console.log('❌ Resend error:', data);
-    res.json({ success: false, error: data.message || 'Failed to send' });
-    
+    console.log('❌ Error:', data);
+    res.json({ success: false, error: data.message || 'Failed' });
   } catch (error) {
-    console.log('❌ Error:', error.message);
     res.json({ success: false, error: error.message });
   }
 });
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`✅ Email API Server running on port ${PORT}`);
-  console.log(`📧 Using Resend API for email delivery`);
-  console.log(`🆓 Free tier: 3,000 emails/month`);
+  console.log(`✅ Email API running on port ${PORT}`);
+  console.log(`📎 Attachment support enabled`);
 });
