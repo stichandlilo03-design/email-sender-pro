@@ -198,8 +198,45 @@ export default function EmailSenderPremiumFinal() {
           attachments: (template.attachments || []).map(a => ({ filename: a.filename, content: a.content }))
         }) 
       });
-      return await res.json();
-    } catch (err) { return { success: false, error: err.message }; }
+      
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ error: 'HTTP ' + res.status }));
+        return { success: false, error: 'HTTP Error ' + res.status + ': ' + (errorData.error || 'Unknown error'), code: res.status };
+      }
+      
+      const result = await res.json();
+      
+      if (!result) return { success: false, error: 'Empty response from server' };
+      
+      if (result.success === true) {
+        if (result.messageId || result.id || result.accepted) {
+          return { success: true, messageId: result.messageId || result.id };
+        }
+        return { success: true, messageId: 'unknown', warning: true };
+      }
+      
+      if (result.error) {
+        let friendlyError = result.error;
+        if (result.error.includes('550')) friendlyError = '550 Blocked - Check SPF/DKIM';
+        else if (result.error.includes('553')) friendlyError = '553 Invalid sender - Check from email';
+        else if (result.error.includes('554')) friendlyError = '554 Service unavailable';
+        else if (result.error.includes('535')) friendlyError = '535 Auth failed - Check password';
+        else if (result.error.includes('ECONNREFUSED')) friendlyError = 'Connection refused - Check host/port';
+        else if (result.error.includes('ETIMEDOUT')) friendlyError = 'Connection timeout - Check port/encryption';
+        else if (result.error.includes('ENOTFOUND')) friendlyError = 'Host not found - Check SMTP host';
+        else if (result.error.includes('Mail from command')) friendlyError = 'Sender not allowed - Check from email/SPF';
+        
+        return { success: false, error: friendlyError, rawError: result.error };
+      }
+      
+      return { success: false, error: 'Unexpected response: ' + JSON.stringify(result).slice(0, 100) };
+      
+    } catch (err) { 
+      let friendlyError = err.message;
+      if (err.message.includes('Failed to fetch')) friendlyError = 'Network error - Backend unreachable';
+      else if (err.message.includes('timeout')) friendlyError = 'Request timeout - Server too slow';
+      return { success: false, error: friendlyError, rawError: err.message }; 
+    }
   };
 
   const startCampaign = async () => {
@@ -224,8 +261,8 @@ export default function EmailSenderPremiumFinal() {
       setCurrentEmailIndex(i + 1);
       addLogEntry({ type: 'sending', message: '📤 ' + contact.email, smtp: smtp.name });
       const result = await sendSingleEmail(contact, smtp, template);
-      if (result.success) { sent++; addLogEntry({ type: 'success', message: '✅ ' + contact.email }); setContacts(p => p.map(c => c.id === contact.id ? { ...c, status: 'sent' } : c)); }
-      else { failed++; addLogEntry({ type: 'error', message: '❌ ' + contact.email + ' - ' + (result.error || 'Error') }); setContacts(p => p.map(c => c.id === contact.id ? { ...c, status: 'failed' } : c)); }
+      if (result.success) { sent++; addLogEntry({ type: 'success', message: '✅ ' + contact.email + (result.warning ? ' ⚠️ (No MessageID)' : result.messageId ? ' (ID: ' + result.messageId.slice(0, 20) + '...)' : ''), smtp: smtp.name }); setContacts(p => p.map(c => c.id === contact.id ? { ...c, status: 'sent' } : c)); }
+      else { failed++; addLogEntry({ type: 'error', message: '❌ ' + contact.email + ' - ' + result.error, smtp: smtp.name, rawError: result.rawError }); setContacts(p => p.map(c => c.id === contact.id ? { ...c, status: 'failed' } : c)); }
       setSendingStats({ sent, failed, total: selected.length }); setCampaignProgress(Math.round(((i + 1) / selected.length) * 100));
       setCampaigns(p => p.map(c => c.id === campaign.id ? { ...c, sent, failed } : c));
       if (i < selected.length - 1 && !abortRef.current) { addLogEntry({ type: 'info', message: '⏳ Wait ' + sendDelay + 's' }); await new Promise(r => setTimeout(r, sendDelay * 1000)); }
