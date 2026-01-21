@@ -37,7 +37,16 @@ export default function EmailSenderComplete() {
   const [currentEmailIndex, setCurrentEmailIndex] = useState(0);
   const pausedRef = useRef(false);
   const abortRef = useRef(false);
-  const [apiEndpoint, setApiEndpoint] = useState('http://localhost:3001');
+  // Auto-detect if running on localhost or use Render deployment
+  const getApiEndpoint = () => {
+    if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
+      return 'http://localhost:3001';
+    }
+    // For production (Render.com or other hosting)
+    return 'https://email-sender-pro-1k47.onrender.com';
+  };
+  
+  const [apiEndpoint, setApiEndpoint] = useState(getApiEndpoint());
   const [importText, setImportText] = useState('');
   const [selectedGroup, setSelectedGroup] = useState('All');
   const [searchTerm, setSearchTerm] = useState('');
@@ -141,8 +150,19 @@ export default function EmailSenderComplete() {
 
   const addSmtpAccount = () => {
     if (!newSmtp.name || !newSmtp.host) { addNotification('Enter name and host', 'warning'); return; }
-    if (editingSmtp) setSmtpAccounts(p => p.map(s => s.id === editingSmtp.id ? { ...newSmtp, id: s.id, status: 'untested' } : s));
-    else setSmtpAccounts(p => [...p, { ...newSmtp, id: Date.now(), status: 'untested' }]);
+    
+    // Auto-fix Hostinger port 465 encryption settings
+    let correctedSmtp = { ...newSmtp };
+    if (correctedSmtp.host.includes('hostinger') && parseInt(correctedSmtp.port) === 465) {
+      if (correctedSmtp.encryption === 'STARTTLS' || !correctedSmtp.secure) {
+        correctedSmtp.encryption = 'SSL/TLS';
+        correctedSmtp.secure = true;
+        addNotification('⚙️ Auto-fixed: Port 465 requires SSL/TLS + Secure: true', 'info');
+      }
+    }
+    
+    if (editingSmtp) setSmtpAccounts(p => p.map(s => s.id === editingSmtp.id ? { ...correctedSmtp, id: s.id, status: 'untested' } : s));
+    else setSmtpAccounts(p => [...p, { ...correctedSmtp, id: Date.now(), status: 'untested' }]);
     addNotification('SMTP saved', 'success');
     setNewSmtp({ name: '', host: 'smtp.gmail.com', port: '587', username: '', password: '', fromName: '', fromEmail: '', enabled: true, encryption: 'STARTTLS', secure: false });
     setEditingSmtp(null);
