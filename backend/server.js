@@ -412,7 +412,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log('');
   console.log('╔════════════════════════════════════════════════════════╗');
   console.log('║                                                        ║');
-  console.log(`║  ✅ Email API Server running on port ${PORT}          ║`);
+  console.log(`║  ✅ Email API Server running on port ${PORT}`.padEnd(57) + '║');
   console.log('║                                                        ║');
   console.log('║  Features:                                             ║');
   console.log('║  ✓ Universal SMTP Support (50+ providers)             ║');
